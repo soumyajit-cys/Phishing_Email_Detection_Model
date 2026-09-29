@@ -1,9 +1,7 @@
 """CLI prediction for the trained phishing email detector.
 
-Usage (from project root):
+Running (from project root):
     python src/predict.py
-    python src/predict.py --subject "..." --body "..."
-    python src/predict.py --model models/phishing_email_model.pkl
 """
 
 import argparse
@@ -17,7 +15,8 @@ if str(PROJECT_ROOT) not in sys.path:
 import joblib
 
 from src.preprocessing import combine_subject_body
-from src.url_features import extract_url_features
+from src.text_features import find_suspicious_keywords
+from src.url_features import extract_url_features, extract_urls
 
 DEFAULT_MODEL = PROJECT_ROOT / "models" / "phishing_email_model.pkl"
 
@@ -33,12 +32,11 @@ def load_model(model_path: Path):
         raise ValueError(f"Corrupted model file at {model_path}: {exc}") from exc
     if isinstance(payload, dict) and "pipeline" in payload:
         return payload["pipeline"], payload.get("model_name", "unknown"), payload
-    # Backwards compatibility: raw pipeline was saved directly.
     return payload, "unknown", {}
 
 
 def predict_single(subject: str, body: str, model_path: Path = DEFAULT_MODEL):
-    """Return (label_str, probability, url_features_dict)."""
+    """Return (label, phishing_proba, url_features, keywords, model_name)."""
     subject = subject or ""
     body = body or ""
     if not subject.strip() and not body.strip():
@@ -46,14 +44,18 @@ def predict_single(subject: str, body: str, model_path: Path = DEFAULT_MODEL):
     pipeline, model_name, _ = load_model(Path(model_path))
     combined = combine_subject_body(subject, body)
     pred = pipeline.predict([combined])[0]
-    proba = None
+    phishing_proba = None
     if hasattr(pipeline, "predict_proba"):
         try:
-            proba = float(max(pipeline.predict_proba([combined])[0]))
+            proba = pipeline.predict_proba([combined])[0]
+            classes = list(pipeline.classes_)
+            phishing_proba = float(proba[classes.index(1)]) if 1 in classes else None
         except Exception:
-            proba = None
+            phishing_proba = None
     label = "PHISHING" if int(pred) == 1 else "SAFE"
-    return label, proba, extract_url_features(combined), model_name
+    url_feats = extract_url_features(combined)
+    keywords = find_suspicious_keywords(combined)
+    return label, phishing_proba, url_feats, keywords, model_name
 
 
 def main() -> None:
@@ -63,9 +65,9 @@ def main() -> None:
     parser.add_argument("--model", type=str, default=str(DEFAULT_MODEL))
     args = parser.parse_args()
 
-    print("================================")
+    print("--------------------------------")
     print("PHISHING EMAIL DETECTOR")
-    print("================================")
+    print("--------------------------------")
     try:
         if args.subject is not None or args.body is not None:
             subject = args.subject or ""
@@ -73,23 +75,35 @@ def main() -> None:
         else:
             subject = input("Enter email subject: ")
             body = input("Enter email body: ")
-        label, proba, url_feats, model_name = predict_single(
+        label, phishing_proba, url_feats, keywords, model_name = predict_single(
             subject, body, Path(args.model)
         )
     except (FileNotFoundError, ValueError) as exc:
         print(f"Error: {exc}")
         return
 
+    combined = combine_subject_body(subject, body)
+    urls = extract_urls(combined)
+    n_https = sum(1 for u in urls if u.lower().startswith("https://"))
+
     print(f"\nPrediction: {label}")
-    if proba is not None:
-        print(f"Probability: {proba * 100:.2f}%")
-        print("(Model confidence, not a guarantee the email is/ isn't malicious.)")
+    if phishing_proba is not None:
+        print(f"\nPhishing Probability: {phishing_proba * 100:.2f}%")
+        print("(Model confidence only — not a guarantee the email is/ isn't malicious.)")
+    print(f"\nDetected URLs: {int(url_feats['num_urls'])}")
+    print(f"Suspicious Keywords: {len(keywords)}"
+          + (f" ({', '.join(keywords)})" if keywords else ""))
+    print(f"HTTPS URLs: {n_https}")
     print(f"Model: {model_name}")
     print(
-        f"URL signals: num_urls={int(url_feats['num_urls'])}, "
+        f"URL statistics: length={int(url_feats['max_url_length'])}, "
+        f"unique={int(url_feats['num_unique_urls'])}, "
         f"ip_urls={int(url_feats['num_ip_urls'])}, "
-        f"suspicious_tld={int(url_feats['has_suspicious_tld'])}, "
-        f"https={int(url_feats['has_https'])}"
+        f"dots={int(url_feats['num_dots'])}, "
+        f"hyphens={int(url_feats['num_hyphens'])}, "
+        f"query_params={int(url_feats['num_query_params'])}, "
+        f"suspicious_pattern={int(url_feats['has_suspicious_pattern'])}, "
+        f"shortener={int(url_feats['has_url_shortener'])}"
     )
 
 
