@@ -1,4 +1,12 @@
-"""Reusable text preprocessing for phishing email detection."""
+"""Reusable text preprocessing for phishing email detection.
+
+Design note: phishing indicators (URLs, domains, numbers, suspicious
+words, special URL characters) are PRESERVED. clean_text only
+lowercases, unescapes/strips HTML, replaces raw URLs/emails with
+placeholder tokens (so the model still sees a URL signal without
+memorising exact domains), and collapses whitespace. Punctuation and
+numbers are left for the TF-IDF tokenizer.
+"""
 
 import re
 from html import unescape
@@ -15,15 +23,7 @@ _WHITESPACE_RE = re.compile(r"\s+")
 
 
 def clean_text(text: str) -> str:
-    """Clean a single email text string.
-
-    Steps: unescape HTML entities, strip HTML tags, lowercase,
-    replace URLs/emails with placeholder tokens, collapse whitespace.
-
-    Punctuation is left for the TF-IDF tokenizer to handle, except
-    that excessive non-alphanumeric noise is normalised to spaces
-    so placeholder tokens remain meaningful.
-    """
+    """Clean a single email string while preserving phishing signals."""
     if text is None:
         return ""
     if not isinstance(text, str):
@@ -42,7 +42,6 @@ def combine_subject_body(subject: str | None, body: str | None) -> str:
     """Combine subject and body into a single raw string."""
     subject = "" if subject is None else str(subject)
     body = "" if body is None else str(body)
-    # Handle NaN floats coming from pandas.
     if subject.lower() == "nan":
         subject = ""
     if body.lower() == "nan":
@@ -53,24 +52,24 @@ def combine_subject_body(subject: str | None, body: str | None) -> str:
 
 
 def clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    """Validate and clean a raw email dataframe.
+    """Clean a canonical dataframe with subject/body/label columns.
 
-    Expected columns: subject (optional), email_text/body, label.
-    Accepts 'email_text', 'body', or 'email_body' as the body column.
-    Returns a dataframe with columns: subject, email_text, label, combined_text.
+    Prefer src.data_loader.normalise_columns for loading raw CSVs with
+    arbitrary column names; this function handles the final cleaning step
+    and also accepts the legacy 'email_text' body column.
     """
     if df is None or df.empty:
         raise ValueError("Dataset is empty.")
 
     body_col = None
-    for candidate in ("email_text", "body", "email_body", "text", "content"):
+    for candidate in ("body", "email_text", "email_body", "text", "content"):
         if candidate in df.columns:
             body_col = candidate
             break
     if body_col is None:
         raise ValueError(
             f"Missing email body column. Found columns: {list(df.columns)}. "
-            "Expected one of: email_text, body, email_body."
+            "Expected columns: subject, body, label."
         )
     if "label" not in df.columns:
         raise ValueError(
@@ -83,18 +82,16 @@ def clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
     cleaned["subject"] = cleaned["subject"].fillna("").astype(str)
     cleaned[body_col] = cleaned[body_col].fillna("").astype(str)
-    cleaned = cleaned.rename(columns={body_col: "email_text"})
+    if body_col != "body":
+        cleaned = cleaned.rename(columns={body_col: "body"})
 
-    # Drop rows where both subject and body are empty.
     mask_empty = (
-        cleaned["subject"].str.strip().eq("")
-        & cleaned["email_text"].str.strip().eq("")
+        cleaned["subject"].str.strip().eq("") & cleaned["body"].str.strip().eq("")
     )
     cleaned = cleaned.loc[~mask_empty].copy()
     if cleaned.empty:
         raise ValueError("Dataset has no usable rows after removing empty emails.")
 
-    # Validate labels are 0/1.
     try:
         cleaned["label"] = cleaned["label"].astype(int)
     except (ValueError, TypeError) as exc:
@@ -105,6 +102,6 @@ def clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
     cleaned["combined_text"] = [
         combine_subject_body(s, b)
-        for s, b in zip(cleaned["subject"], cleaned["email_text"])
+        for s, b in zip(cleaned["subject"], cleaned["body"])
     ]
-    return cleaned[["subject", "email_text", "label", "combined_text"]]
+    return cleaned[["subject", "body", "label", "combined_text"]]

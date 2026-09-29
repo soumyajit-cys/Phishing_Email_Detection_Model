@@ -1,7 +1,7 @@
 """Static URL feature extraction (no network requests).
 
 Only static string/regex analysis is performed. URLs are never
-visited, downloaded, or opened.
+visited, requested, crawled, downloaded, or opened.
 """
 
 import re
@@ -14,23 +14,30 @@ from sklearn.base import BaseEstimator, TransformerMixin
 URL_REGEX = re.compile(r"https?://[^\s<>'\"]+|www\.[^\s<>'\"]+", re.IGNORECASE)
 IP_URL_RE = re.compile(r"https?://\d{1,3}(?:\.\d{1,3}){3}")
 SUSPICIOUS_CHARS = set("@-_%&=~?#$!+")
-REDIRECT_KEYWORDS = ("redirect", "forward", "verify", "login", "secure", "account")
 SUSPICIOUS_TLDS = {
     ".tk", ".ml", ".ga", ".cf", ".gq", ".xyz", ".top", ".click",
     ".link", ".work", ".country", ".stream", ".download", ".loan",
     ".win", ".bid", ".party", ".review",
 }
+URL_SHORTENERS = {
+    "bit.ly", "tinyurl.com", "t.co", "goo.gl", "ow.ly", "is.gd",
+    "buff.ly", "adf.ly", "bit.do", "cutt.ly", "tiny.cc", "shorturl.at",
+}
 
 FEATURE_NAMES: List[str] = [
     "num_urls",
+    "max_url_length",
     "num_unique_urls",
     "num_ip_urls",
-    "num_suspicious_chars",
-    "num_redirects",
-    "has_https",
-    "max_url_length",
     "max_num_subdomains",
-    "has_suspicious_tld",
+    "num_dots",
+    "num_hyphens",
+    "num_suspicious_chars",
+    "num_query_params",
+    "has_https",
+    "has_suspicious_pattern",
+    "has_url_shortener",
+    "url_to_text_ratio",
 ]
 
 
@@ -49,8 +56,24 @@ def _domain_of(url: str) -> str:
         return ""
 
 
+def _has_suspicious_pattern(url: str, domain: str) -> bool:
+    lower = url.lower()
+    if any(domain.endswith(tld) for tld in SUSPICIOUS_TLDS):
+        return True
+    if "@" in url:
+        return True
+    after_protocol = lower.split("://", 1)[-1] if "://" in lower else lower
+    if "//" in after_protocol:
+        return True
+    if any(k in lower for k in ("verify", "login", "secure", "account", "redirect")) and (
+        "%" in lower or "redirect" in lower
+    ):
+        return True
+    return False
+
+
 def extract_url_features(text: str) -> Dict[str, float]:
-    """Extract numeric URL features from a single email string."""
+    """Extract static numeric URL features from a single email string."""
     if text is None:
         text = ""
     if not isinstance(text, str):
@@ -58,54 +81,60 @@ def extract_url_features(text: str) -> Dict[str, float]:
 
     urls = extract_urls(text)
     num_urls = len(urls)
-    num_unique = len(set(u.lower() for u in urls))
+    unique_urls = set(u.lower() for u in urls)
     num_ip_urls = sum(1 for u in urls if IP_URL_RE.search(u))
-    num_suspicious_chars = sum(u.count(c) for u in urls for c in SUSPICIOUS_CHARS)
-
-    num_redirects = 0
-    for url in urls:
-        lower = url.lower()
-        # Count '//' appearing after the protocol as a redirect/obfuscation hint.
-        after_protocol = lower.split("://", 1)[-1] if "://" in lower else lower
-        if "//" in after_protocol:
-            num_redirects += 1
-        if "@" in url:
-            num_redirects += 1
-        if any(k in lower for k in REDIRECT_KEYWORDS) and (
-            "%" in lower or "@" in lower or "redirect" in lower
-        ):
-            num_redirects += 1
-
-    has_https = int(any(u.lower().startswith("https://") for u in urls))
     max_url_length = max((len(u) for u in urls), default=0)
 
     max_subdomains = 0
+    num_dots = 0
+    num_hyphens = 0
+    num_suspicious_chars = 0
+    num_query_params = 0
+    has_https = 0
+    has_suspicious_pattern = 0
+    has_url_shortener = 0
+
     for url in urls:
+        lower = url.lower()
+        if lower.startswith("https://"):
+            has_https = 1
+        num_suspicious_chars += sum(url.count(c) for c in SUSPICIOUS_CHARS)
+        num_dots += url.count(".")
+        num_hyphens += url.count("-")
+        # Query parameters: count '&' plus one if '?' present.
+        if "?" in url:
+            num_query_params += url.count("&") + 1
+
         domain = _domain_of(url).split(":")[0].split("@")[-1]
-        # Strip leading www.
-        if domain.startswith("www."):
-            domain = domain[4:]
-        parts = [p for p in domain.split(".") if p]
+        bare = domain[4:] if domain.startswith("www.") else domain
+        parts = [p for p in bare.split(".") if p]
         if len(parts) > 2:
             max_subdomains = max(max_subdomains, len(parts) - 2)
+        if _has_suspicious_pattern(url, domain):
+            has_suspicious_pattern = 1
+        if bare in URL_SHORTENERS or any(
+            bare == s or bare.endswith("." + s) for s in URL_SHORTENERS
+        ):
+            has_url_shortener = 1
 
-    has_suspicious_tld = 0
-    for url in urls:
-        domain = _domain_of(url).split(":")[0].split("@")[-1]
-        if any(domain.endswith(tld) for tld in SUSPICIOUS_TLDS):
-            has_suspicious_tld = 1
-            break
+    text_len = max(len(text), 1)
+    total_url_chars = sum(len(u) for u in urls)
+    url_to_text_ratio = total_url_chars / text_len if num_urls else 0.0
 
     return {
         "num_urls": float(num_urls),
-        "num_unique_urls": float(num_unique),
-        "num_ip_urls": float(num_ip_urls),
-        "num_suspicious_chars": float(num_suspicious_chars),
-        "num_redirects": float(num_redirects),
-        "has_https": float(has_https),
         "max_url_length": float(max_url_length),
+        "num_unique_urls": float(len(unique_urls)),
+        "num_ip_urls": float(num_ip_urls),
         "max_num_subdomains": float(max_subdomains),
-        "has_suspicious_tld": float(has_suspicious_tld),
+        "num_dots": float(num_dots),
+        "num_hyphens": float(num_hyphens),
+        "num_suspicious_chars": float(num_suspicious_chars),
+        "num_query_params": float(num_query_params),
+        "has_https": float(has_https),
+        "has_suspicious_pattern": float(has_suspicious_pattern),
+        "has_url_shortener": float(has_url_shortener),
+        "url_to_text_ratio": float(url_to_text_ratio),
     }
 
 

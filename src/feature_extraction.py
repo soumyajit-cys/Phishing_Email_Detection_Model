@@ -2,28 +2,13 @@
 
 from scipy.sparse import csr_matrix, hstack
 from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from .preprocessing import clean_text
+from .text_features import build_tfidf_vectorizer
 from .url_features import UrlFeatureExtractor
 
 TFIDF_MAX_FEATURES = 5000
-
-
-def build_tfidf_vectorizer(
-    max_features: int = TFIDF_MAX_FEATURES,
-) -> TfidfVectorizer:
-    """Build a TF-IDF vectorizer that reuses clean_text as preprocessor."""
-    return TfidfVectorizer(
-        preprocessor=clean_text,
-        lowercase=False,  # clean_text already lowercases
-        stop_words="english",
-        max_features=max_features,
-        ngram_range=(1, 2),
-        min_df=2,
-    )
 
 
 class TextAndUrlFeatures(BaseEstimator, TransformerMixin):
