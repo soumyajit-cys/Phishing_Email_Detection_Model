@@ -5,7 +5,8 @@ venv/
 .env
 models/*.pkl
 !models/.gitkeep
-results/*.png
+reports/*.png
+!reports/.gitkeep
 .ipynb_checkpoints/
 .pytest_cache/
 .DS_Store

@@ -1,4 +1,4 @@
-subject,email_text,label
+subject,body,label
 Account security tips,Reminder: never share your password. Our team will never ask for credentials by email. Review tips at https://security.example.com/tips.,0
 Flight itinerary confirmed,Your flight booking is confirmed. Departure Monday 8am. View details at https://www.airline-example.com/booking/8067. Safe travels!,0
 Security verification needed,Unusual sign-in attempt detected. Verify your identity at http://account-update-validate.xyz/login by entering your login and password.,1
