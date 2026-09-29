@@ -107,8 +107,8 @@ URL numeric features (`src/url_features.py`, regex + `urllib.parse` only):
 
 ```bash
 pip install -r requirements.txt
-python -m src.train
-python -m src.train --data data/raw/emails.csv --test-size 0.2
+python src/train.py
+python src/train.py --data data/raw/emails.csv --test-size 0.2
 ```
 
 Output: class balance, per-model accuracy/precision/recall/F1 + TP/TN/FP/FN + classification report, comparison table, winning model name, `models/phishing_email_model.pkl`, `results/confusion_matrix.png`.
@@ -149,18 +149,18 @@ pip install -r requirements.txt
 ### Training
 
 ```bash
-python -m src.train
+python src/train.py
 ```
 
 ### CLI Prediction
 
 ```bash
-python -m src.predict
+python src/predict.py
 # Enter email subject: Your account has been suspended
 # Enter email body: Click http://secure-verify-login.tk/auth immediately ...
 
 # Non-interactive:
-python -m src.predict --subject "Team meeting tomorrow" --body "Standup at 10am in room B."
+python src/predict.py --subject "Team meeting tomorrow" --body "Standup at 10am in room B."
 ```
 
 ### Streamlit Application
@@ -233,7 +233,7 @@ Run tests: `python -m pytest tests/ -v`
 
 ## Results
 
-Actual output from `python -m src.train` on the bundled 420-row sample (336 train / 84 test, stratified, `random_state=42`):
+Actual output from `python src/train.py` on the bundled 420-row sample (336 train / 84 test, stratified, `random_state=42`):
 
 | Model | Accuracy | Precision | Recall | F1 Score |
 |---|---|---|---|---|
