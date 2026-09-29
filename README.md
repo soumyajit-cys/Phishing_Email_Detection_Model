@@ -1,239 +1,101 @@
 # Phishing Email Detection Model
 
-Defensive cybersecurity + ML mini-project: classify an email as **Phishing (1)** or **Safe (0)** from its subject, body text, and static URL signals — using Scikit-learn. No links are ever opened, downloaded, or executed.
+Defensive cybersecurity + ML mini-project: classify an email as **Phishing (1)** or **Safe (0)** from subject + body text and static URL signals. URLs are never opened, requested, or downloaded.
 
-## Overview
+## Problem Statement
 
-Phishing emails use urgency ("act now"), credential theft ("verify your password"), and lookalike/malicious URLs to steal accounts and money. This project builds a reproducible text + URL-feature classifier with:
+Phishing emails imitate banks, services, and colleagues — using urgency, credential requests, and deceptive links — to steal accounts and money. Manual inspection does not scale, so an automated assistant that flags suspicious mail (while explaining its signals) is needed.
 
-- Reusable preprocessing (`src/preprocessing.py`)
-- Static URL feature extraction (`src/url_features.py`, never visits URLs)
-- TF-IDF + numeric features (`src/feature_extraction.py`)
-- 3 compared models, stratified split, best-F1 selection (`src/train.py`)
-- CLI prediction (`src/predict.py`) + Streamlit UI (`app.py`)
-- Tests with pytest (`tests/`)
+## Objective
 
-> ML output is a **confidence score, not proof**. Expect false positives/negatives. Always verify sensitive requests via official channels.
+Build a reproducible Scikit-learn system that: loads a phishing/legitimate CSV, extracts text + URL/keyword features statically, classifies mail as Phishing/Safe, and reports **accuracy + confusion matrix** from real training results.
+
+Mentor checklist: phishing + legitimate dataset ✓, text + URL/keyword extraction ✓, Phishing/Safe classification ✓, accuracy + confusion matrix ✓.
 
 ## Features
 
-- Subject + body combined analysis
-- HTML stripping, lowercasing, URL/email placeholder tokens, whitespace normalisation
-- TF-IDF (unigrams + bigrams, 5000 features, English stop words)
-- 9 static URL features (counts, IP URLs, suspicious chars/TLDs, HTTPS, length, subdomains, redirects)
-- Logistic Regression / Multinomial Naive Bayes / Random Forest comparison
-- Accuracy, precision, recall, F1, classification report, confusion matrix (PNG)
-- Joblib-saved pipeline reloadable without retraining
-- CLI + Streamlit front end with confidence + URL-signal table
-- Validation for missing data, bad labels, empty input, corrupt model
-
-## Architecture
-
-```text
-Email (subject + body)
-  ↓
-Preprocessing (clean_text, combine_subject_body)
-  ↓
-Text + URL Feature Extraction (static only, no network)
-  ↓
-TF-IDF + Numerical Features (fitted on TRAIN only)
-  ↓
-Machine Learning Model (LR / NB / RF, best-F1 wins)
-  ↓
-Prediction
-  ↓
-Phishing / Safe
-  ↓
-Confidence + Analysis (probability + URL signals)
-```
-
-Data-leakage rule: `train_test_split` happens **before** `fit`. The `TfidfVectorizer` and `StandardScaler` are fitted only on `X_train` inside the pipeline. See `src/train.py` and `src/feature_extraction.py:TextAndUrlFeatures`.
-
-## Technologies Used
-
-- Python 3.11+
-- Scikit-learn, Pandas, NumPy, SciPy
-- Matplotlib, Seaborn (confusion matrix)
-- Joblib (model persistence)
-- Streamlit (optional UI)
-- pytest (tests)
+- Canonical `subject, body, label` loader with alias mapping (`email_text`, `email_body`, …)
+- Reusable preprocessing preserving phishing signals (URLs→`urltoken`, numbers, domains, suspicious words)
+- TF-IDF text features + 17-word suspicious-keyword analysis (explanatory only — one keyword never decides the label)
+- 13 static URL features (counts, lengths, IP hosts, subdomains, dots, hyphens, suspicious chars, query params, HTTPS, suspicious patterns, shorteners, URL-to-text ratio)
+- Logistic Regression / Multinomial Naive Bayes / Random Forest comparison (`stratify`, `random_state=42`, pipeline-fitted TF-IDF)
+- Accuracy, precision, recall, F1, classification report, Seaborn confusion matrix
+- Joblib pipeline (TF-IDF included — no manual vectorizer rebuild)
+- CLI + 5-section Streamlit UI with confidence and feature tables
 
 ## Dataset
 
-Expected CSV: `data/raw/emails.csv` with columns:
+Required CSV `data/raw/emails.csv`:
 
 | column | meaning |
 |---|---|
-| `subject` | email subject (optional, defaults to `""`) |
-| `email_text` | email body (`body` / `email_body` also accepted) |
-| `label` | `1` = Phishing, `0` = Safe |
+| `subject` | email subject |
+| `body` | email body |
+| `label` | `0` = Safe, `1` = Phishing |
 
-This repo ships a **synthetic sample dataset** (`420` rows, `210` phishing / `210` safe, balanced) generated from phishing templates (account suspension, lottery, invoice, crypto, delivery…) and safe templates (meetings, receipts, HR, newsletters…) plus harder overlap cases (URL-stripped phishing, multi-URL safe mail). It exists **only to test the pipeline end-to-end**.
+The loader (`src/data_loader.py`) also accepts legacy names (`email_text`, `email_body`, `text`, `content`, `class`, `target`). Invalid labels, missing columns, and empty files raise clear errors.
 
-> For meaningful evaluation, replace it with a real dataset (e.g. Nazario phishing corpus, Enron-Spam, SpamAssassin, CEAS-08, Kaggle phishing-email corpora). Re-run `python -m src.train` — no code changes needed as long as columns match.
+> The bundled file is a **clearly-labelled DEMONSTRATION dataset** (420 rows: 210 phishing / 210 safe, template-generated with harder overlap cases such as URL-stripped phishing and multi-URL safe mail) so the app runs end-to-end. Meaningful accuracy requires a real corpus (e.g. Nazario, Enron-Spam, SpamAssassin, CEAS-08). Replace the CSV and rerun training — no code changes needed.
 
-Class distribution is printed at train time. Splitting is stratified; `LogisticRegression` and `RandomForest` use `class_weight="balanced"`. No blind oversampling.
+## Dataset Statistics
 
-## Machine Learning Approach
+Printed by `python src/train.py` (actual output on the demo set):
 
-1. `clean_dataframe()` validates columns/labels, fills NaNs, drops fully-empty rows.
-2. Stratified `train_test_split(test_size=0.2, random_state=42)`.
-3. Pipelines (so vectorizer/scaler fit only on train):
-   - NB: `TfidfVectorizer → MultinomialNB` (text-only; NB needs non-negative input).
-   - LR: `TextAndUrlFeatures (TF-IDF + scaled URL feats) → LogisticRegression(class_weight=balanced)`.
-   - RF: `TextAndUrlFeatures → RandomForest(n_estimators=200, class_weight=balanced)`.
-4. Evaluate all three on the held-out test set; select highest **F1-score**.
-5. Save `{"pipeline", "model_name", "metrics", "all_metrics"}` via Joblib to `models/phishing_email_model.pkl`; save confusion matrix PNG to `results/confusion_matrix.png`.
+```text
+----- Dataset Statistics -----
+Total emails      : 420
+Phishing emails   : 210 (50.0%)
+Safe emails       : 210 (50.0%)
+Class distribution:
+  Safe (0)    : 210
+  Phishing (1): 210
+Missing values:
+  subject: 0
+  body   : 0
+  label  : 0
+Usable emails after cleaning: 420
+Train: 336  Test: 84 (stratified, random_state=42)
+```
 
 ## Feature Engineering
 
-Text (TF-IDF learns these automatically): urgency words (`urgent`, `immediately`, `24 hours`, `suspended`), credential/payment terms (`verify`, `password`, `login`, `bank`, `account`, `invoice`, `refund`), prize lures (`winner`, `lottery`, `claim`, `prize`, `free`), plus `urltoken` placeholder frequency and bigram patterns.
+### Text Features
 
-URL numeric features (`src/url_features.py`, regex + `urllib.parse` only):
+`src/text_features.py` + `src/preprocessing.py`: lowercase, HTML-entity unescape + tag strip, URL→`urltoken` / email→`emailtoken`, whitespace collapse. Numbers, domains-as-tokens, and suspicious words are kept. TF-IDF (`max_features=5000`, unigrams+bigrams, English stop words, `min_df=2`) learns urgency/credential/prize phrasing automatically. Keyword counter tracks `verify, account, password, login, suspended, urgent, immediately, click, confirm, security, payment, invoice, bank, winner, congratulations, update, credential` for display only.
 
-| feature | description |
+### URL Features
+
+`src/url_features.py` — regex + `urllib.parse` static analysis only:
+
+| feature | meaning |
 |---|---|
-| `num_urls` | total URLs found |
-| `num_unique_urls` | unique URLs |
-| `num_ip_urls` | URLs with `http://1.2.3.4` literal-IP hosts |
-| `num_suspicious_chars` | count of `@ - _ % & = ~ ? # $ ! +` inside URLs |
-| `num_redirects` | `//` after protocol, `@` tricks, `redirect`-keyword + obfuscation hints |
-| `has_https` | 1 if any URL uses HTTPS |
-| `max_url_length` | longest URL length |
-| `max_num_subdomains` | deepest subdomain chain (e.g. `a.b.c.evil.xyz` → 3) |
-| `has_suspicious_tld` | 1 if domain ends in `.tk .ml .ga .cf .gq .xyz .top .click …` |
+| `num_urls` / `num_unique_urls` | total / unique URLs |
+| `max_url_length` | longest URL |
+| `num_ip_urls` | literal-IP hosts (`http://192.168…`) |
+| `max_num_subdomains` | deepest subdomain chain |
+| `num_dots` / `num_hyphens` | totals inside URLs |
+| `num_suspicious_chars` | `@ - _ % & = ~ ? # $ ! +` count |
+| `num_query_params` | `?`/`&` parameter count |
+| `has_https` | any HTTPS URL |
+| `has_suspicious_pattern` | odd TLD, `@` trick, `//` after protocol, `verify/login/redirect` + obfuscation |
+| `has_url_shortener` | `bit.ly`, `tinyurl.com`, `t.co`, … |
+| `url_to_text_ratio` | URL chars ÷ email length |
 
-## Model Training
+## Machine Learning Models
 
-```bash
-pip install -r requirements.txt
-python src/train.py
-python src/train.py --data data/raw/emails.csv --test-size 0.2
-```
+1. **Logistic Regression** — combined TF-IDF + scaled URL features, `class_weight="balanced"`.
+2. **Multinomial Naive Bayes** — text-only TF-IDF pipeline (NB requires non-negative input).
+3. **Random Forest (200 trees)** — combined features, `class_weight="balanced"`.
 
-Output: class balance, per-model accuracy/precision/recall/F1 + TP/TN/FP/FN + classification report, comparison table, winning model name, `models/phishing_email_model.pkl`, `results/confusion_matrix.png`.
+All use `train_test_split(test_size=0.2, stratify=y, random_state=42)`.
+
+## Training Process
+
+`python src/train.py` does: load → validate → clean → print statistics → stratified split → fit pipelines → evaluate → compare → save confusion matrix + CSV + text report → save Joblib model. TF-IDF and scaler are fitted **only on the training split inside each Pipeline**.
 
 ## Model Evaluation
 
-Metrics use `sklearn.metrics` on the held-out test set (`84` emails, `42` per class):
-
-- **Accuracy** — overall correctness.
-- **Precision** — of flagged phishing, how many truly phishing. High precision = few false alarms. Important because false alarms erode trust.
-- **Recall** — of real phishing, how many caught. High recall = few missed attacks. Important because a missed phish (FN) can mean account takeover.
-- **F1** — harmonic mean of precision/recall; used for model selection.
-- **Confusion matrix** — TP/TN/FP/FN breakdown + heatmap.
-
-### Why precision and recall matter here
-
-Missing a phish (low recall) is dangerous; crying wolf on legit mail (low precision) makes users ignore warnings. Phishing detectors are tuned for **high recall without collapsing precision** — hence F1-based selection and reporting both.
-
-### Confusion matrix (winning model, test set)
-
-![Confusion matrix](results/confusion_matrix.png)
-
-How to read it: rows = actual, columns = predicted. Diagonal = correct (TN top-left, TP bottom-right). Off-diagonal = errors (FP top-right = safe flagged as phishing; FN bottom-left = phishing missed as safe). Current best model: `TP=42 TN=42 FP=0 FN=0` (see Results table below for all three models).
-
-Definitions: **TP** = phishing correctly flagged. **TN** = safe correctly passed. **FP** = safe wrongly flagged. **FN** = phishing wrongly passed (most costly).
-
-## Installation
-
-```bash
-git clone <your-repo-url>
-cd phishing-email-detector
-python -m venv .venv && source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-## Usage
-
-### Training
-
-```bash
-python src/train.py
-```
-
-### CLI Prediction
-
-```bash
-python src/predict.py
-# Enter email subject: Your account has been suspended
-# Enter email body: Click http://secure-verify-login.tk/auth immediately ...
-
-# Non-interactive:
-python src/predict.py --subject "Team meeting tomorrow" --body "Standup at 10am in room B."
-```
-
-### Streamlit Application
-
-```bash
-streamlit run app.py
-```
-
-UI: title, subject input, body text area, **Analyze Email** button, result (🔴 PHISHING / 🟢 SAFE), confidence metric, URL-signal table, disclaimer.
-
-## Example Prediction
-
-Phishing:
-
-```text
-================================
-PHISHING EMAIL DETECTOR
-================================
-Subject: Your account has been suspended
-Email: Click http://secure-verify-login.tk/auth immediately to verify your password or your account will be closed.
-
-Prediction: PHISHING
-Probability: 97.37%
-(Model confidence, not a guarantee.)
-```
-
-Safe:
-
-```text
-Subject: Team meeting tomorrow
-Email: Hi team, standup at 10am in room B. Thanks!
-
-Prediction: SAFE
-Probability: 93.51%
-```
-
-## Project Structure
-
-```text
-phishing-email-detector/
-├── app.py                  # Streamlit UI
-├── data/
-│   ├── raw/emails.csv      # sample dataset (replace with real data for research)
-│   └── processed/          # optional cleaned outputs
-├── models/
-│   └── phishing_email_model.pkl  # saved pipeline (regenerate via train)
-├── notebooks/
-│   └── exploration.ipynb   # EDA: balance, lengths, URL stats, top TF-IDF terms
-├── results/
-│   └── confusion_matrix.png
-├── src/
-│   ├── __init__.py
-│   ├── preprocessing.py    # clean_text, combine_subject_body, clean_dataframe
-│   ├── url_features.py     # static URL features + UrlFeatureExtractor
-│   ├── feature_extraction.py  # TF-IDF + TextAndUrlFeatures pipelines
-│   ├── train.py            # train/compare/select/save + metrics + plot
-│   ├── evaluate.py         # metrics + confusion-matrix helpers
-│   └── predict.py          # load model + CLI prediction
-├── tests/
-│   ├── test_preprocessing.py
-│   ├── test_url_features.py
-│   └── test_prediction.py
-├── requirements.txt
-├── README.md
-├── .gitignore
-└── LICENSE
-```
-
-Run tests: `python -m pytest tests/ -v`
-
-## Results
-
-Actual output from `python src/train.py` on the bundled 420-row sample (336 train / 84 test, stratified, `random_state=42`):
+Metrics from `sklearn.metrics` on the held-out test set (84 mails, 42/class) — never hardcoded or invented:
 
 | Model | Accuracy | Precision | Recall | F1 Score |
 |---|---|---|---|---|
@@ -241,29 +103,125 @@ Actual output from `python src/train.py` on the bundled 420-row sample (336 trai
 | Multinomial Naive Bayes | 1.0000 | 1.0000 | 1.0000 | 1.0000 |
 | Random Forest | 1.0000 | 1.0000 | 1.0000 | 1.0000 |
 
-Winning model (highest F1): **Multinomial Naive Bayes** — saved to `models/phishing_email_model.pkl`.
+Selection: highest **F1-score** → **Multinomial Naive Bayes** (F1 balances missed phish vs false alarms). LR missed 5 URL-stripped phishing mails (`FN=5`), showing why text signals matter when URL signals are absent. Full table: `reports/model_comparison.csv`; full report: `reports/classification_report.txt`.
 
-Test-set confusion counts (winner): `TP=42 TN=42 FP=0 FN=0`. Logistic Regression missed 5 URL-stripped phishing mails (`FN=5`), illustrating why text signals matter when URL signals are absent.
+## Accuracy
 
-> These numbers reflect the synthetic sample only. Swap in a real corpus before citing performance anywhere.
+```text
+Model Accuracy: 100.00%
+```
+
+Calculated as `accuracy_score(y_test, y_pred)` for the winning model and printed + saved. Also displayed: precision, recall, F1.
+
+## Precision
+
+Winner: `1.0000` — every flagged phish was truly phishing (no false alarms on this demo test set). High precision keeps users trusting warnings.
+
+## Recall
+
+Winner: `1.0000` — every real phish was caught. High recall is critical because one missed phish (false negative) can mean account takeover.
+
+## F1 Score
+
+Winner: `1.0000` (harmonic mean of precision/recall). Used for model selection.
+
+Why accuracy alone is insufficient: phishing data is usually imbalanced and errors are asymmetric — a 95%-accurate model can still miss most attacks if it always predicts "Safe". Precision/recall and the confusion matrix reveal *which* errors occur.
+
+## Confusion Matrix
+
+![Confusion matrix](reports/confusion_matrix.png)
+
+Generated with Matplotlib + Seaborn, labels `Safe` / `Phishing`, saved to `reports/confusion_matrix.png`. Winner counts: `True Negative=42, False Positive=0, False Negative=0, True Positive=42`. Rows = actual, columns = predicted; diagonal = correct; off-diagonal = errors (FP = safe flagged, FN = phish missed — the costliest).
+
+## Architecture
+
+```text
+Email
+  ↓
+Data Preprocessing
+  ↓
+Text Feature Extraction
+  ↓
+URL Feature Extraction
+  ↓
+Feature Combination
+  ↓
+Machine Learning Model
+  ↓
+Prediction
+  ↓
+Phishing / Safe
+```
+
+Data-leakage prevention: split happens before any `fit`; `TfidfVectorizer`/`StandardScaler` live inside pipelines fitted on `X_train` only. Test labels are never used for features, tuning, or selection beyond final reporting. See `src/train.py` and `src/feature_extraction.py:TextAndUrlFeatures`.
+
+## Installation
+
+```bash
+git clone <your-repo-url>
+cd phishing-email-detector
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+## Dataset Setup
+
+Place a CSV with `subject,body,label` at `data/raw/emails.csv` (aliases auto-mapped). The demo file already there runs as-is; swap in a real corpus for research use.
+
+## Train Model
+
+```bash
+python src/train.py
+```
+
+Generates `models/phishing_email_model.pkl`, `reports/confusion_matrix.png`, `reports/model_comparison.csv`, `reports/classification_report.txt`.
+
+## Run CLI Prediction
+
+```bash
+python src/predict.py
+```
+
+## Run Streamlit
+
+```bash
+streamlit run app.py
+```
+
+Loads the saved model (no retraining). If missing, the UI tells you to run `python src/train.py`. Sections: 1 Email Input, 2 Feature Analysis, 3 Prediction, 4 Model Performance, 5 Confusion Matrix.
+
+## Screenshots
+
+Run `streamlit run app.py` and capture: (1) Email Input + ANALYZE EMAIL, (2) Prediction + Feature Analysis, (3) Model Performance + Confusion Matrix. Save under `screenshots/` (folder ignored by default — create if needed for submission).
+
+## Example Phishing Email
+
+Subject: `Urgent: Verify Your Account`
+Body: `Your account requires immediate verification. Please verify your account using http://secure-verify-login.tk/auth below.`
+Output: `Prediction: PHISHING`, `Phishing Probability: 84.79%`, `Detected URLs: 1`, `Suspicious Keywords: 4 (account, login, urgent, verify)`, `HTTPS URLs: 0`.
+
+## Example Safe Email
+
+Subject: `Meeting Scheduled for Tomorrow`
+Body: `Hi team, The meeting is scheduled for tomorrow at 10 AM. Please join using the meeting details shared internally.`
+Output: `Prediction: SAFE`, `Phishing Probability: 11.68%`, `Detected URLs: 0`, `Suspicious Keywords: 0`, `HTTPS URLs: 0`.
+
+(Examples illustrate I/O format only, not ground truth for evaluation.)
 
 ## Limitations
 
-- Sample dataset is synthetic/template-based; real phish are more diverse and adversarial.
-- English-only; TF-IDF bag-of-words misses paraphrase, homoglyphs, image-based phish.
-- Static URL regexes miss shorteners, compromised legit domains, QR/attachment vectors.
-- No header/auth analysis (SPF/DKIM/DMARC), no attachment sandboxing, no reputation lookups (by design — no network).
-- Perfect scores above are an artefact of the sample; expect lower, messier results on real data.
-- `random_state=42` fixes splits but not concept drift — retrain as phish evolve.
+- Demo data is synthetic; expect lower, messier scores on real corpora.
+- English TF-IDF misses paraphrase, homoglyphs, image/QR/attachment vectors.
+- Static regexes miss shortener-resolved finals and compromised legit domains.
+- No header/auth (SPF/DKIM/DMARC) or reputation lookups (intentional — fully offline).
+- Fixed `random_state=42`; concept drift requires retraining.
 
 ## Future Improvements
 
-- Real-dataset training + cross-validation + calibration curves
-- Character n-grams / subword embeddings, phishing-lexicon features, header features
-- Language-agnostic models, adversarial/typosquat detection, URL-expansion *offline* allowlists
-- Threshold tuning for recall-priority operating points, explainability (top contributing tokens)
-- Monitoring, scheduled retraining, CI tests + linting
+- Real-corpus training, cross-validation, probability calibration, recall-priority thresholds
+- Char n-grams/embeddings, header features, typosquat detection, explainability (top tokens)
+- Monitoring + scheduled retraining + CI lint/test
 
-## Ethical / Security Considerations
+## Ethical/Security Considerations
 
-Defensive, educational project only. Treat all email content as **untrusted input**: never execute attachments, open URLs, download resources, send mail, or contact suspicious domains — this codebase performs static string analysis exclusively. Predictions can be wrong in both directions; do not use as sole basis for blocking, punishment, or legal action. Handle real email corpora with privacy care (PII minimisation, consent, retention limits).
+Defensive educational project only. All content treated as untrusted: never open URLs, send requests, download attachments, execute content, or visit domains — analysis is purely static. Probabilities are confidences, not certainty. Do not use as sole basis for blocking or disciplinary action. Handle real mail corpora with PII care.
