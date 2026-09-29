@@ -6,7 +6,12 @@ Usage (from project root):
 """
 
 import argparse
+import sys
 from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 import joblib
 import pandas as pd
@@ -15,11 +20,9 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 from sklearn.naive_bayes import MultinomialNB
 
-from .evaluate import plot_confusion_matrix, print_evaluation
-from .feature_extraction import build_combined_pipeline, build_text_pipeline
-from .preprocessing import clean_dataframe
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+from src.evaluate import plot_confusion_matrix, print_evaluation
+from src.feature_extraction import build_combined_pipeline, build_text_pipeline
+from src.preprocessing import clean_dataframe
 DEFAULT_DATA = PROJECT_ROOT / "data" / "raw" / "emails.csv"
 DEFAULT_MODEL = PROJECT_ROOT / "models" / "phishing_email_model.pkl"
 DEFAULT_CM = PROJECT_ROOT / "results" / "confusion_matrix.png"
