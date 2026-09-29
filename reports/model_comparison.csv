@@ -1,0 +1,4 @@
+,accuracy,precision,recall,f1,TP,TN,FP,FN
+Logistic Regression,0.9404761904761905,1.0,0.8809523809523809,0.9367088607594937,37.0,42.0,0.0,5.0
+Multinomial Naive Bayes,1.0,1.0,1.0,1.0,42.0,42.0,0.0,0.0
+Random Forest,1.0,1.0,1.0,1.0,42.0,42.0,0.0,0.0
